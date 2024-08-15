@@ -1,2 +1,6 @@
 # multi_modal
 多模态题库召回，题目图像召回题库文本，基于blip2模型和milvus向量库
+
+blip2的训练、推理以及题库召回的验证
+
+模型训练基于huggingface的accelerate库进行分布式训练，训练记录使用tensorboard
