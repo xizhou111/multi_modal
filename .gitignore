@@ -24,28 +24,14 @@ eval/mappings
 /eval/util/id2imgname.py
 /eval/util/interface.py
 /eval/util/ocr_interface.py
+/eval/search_erro_list.json
 
 /eval/eval_local_img_milvus_zcl_query_cls.py
 /eval/eval_local_img_milvus_zcl.py
 
-/logs_clip_L_chinese-roberta-wwm-ext_448_i2t_0811
-/logs_eva_clip_g_chinese-roberta-wwm-ext_448_i2t_0811
-/logs_eva_clip_g_chinese-roberta-wwm-ext_448_i2t_0811_baiduyun2
-/logs_eva-clip-g_chinese-roberta-wwm-ext
-/logs_eva-clip-g_chinese-roberta-wwm-ext_448
-/logs_eva-clip-g_chinese-roberta-wwm-ext_448_i2t
-/logs_eva-clip-g_chinese-roberta-wwm-ext_448_i2t_query_cls
-/logs_eva-clip-g_chinese-roberta-wwm-ext_image_ids
-/logs_eva-clip-g_chinese-roberta-wwm-ext_image_ids_512
+/logs
+/outputs
 
-/output_clip_L_chinese-roberta-wwm-ext_448_i2t_0811
-/output_eva_clip_g_chinese-roberta-wwm-ext
-/output_eva_clip_g_chinese-roberta-wwm-ext_448
-/output_eva_clip_g_chinese-roberta-wwm-ext_448_i2t
-/output_eva_clip_g_chinese-roberta-wwm-ext_448_i2t_0811
-/output_eva_clip_g_chinese-roberta-wwm-ext_448_i2t_0811_baiduyun2
-/output_eva_clip_g_chinese-roberta-wwm-ext_448_i2t_query_cls
-/output_eva_clip_g_chinese-roberta-wwm-ext_image_ids
-/output_eva_clip_g_chinese-roberta-wwm-ext_image_ids_512
+/triton_cache
 
 train_DDP.py
