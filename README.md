@@ -3,4 +3,8 @@
 
 blip2的训练、推理以及题库召回的验证
 
-模型训练基于huggingface的accelerate库进行分布式训练，训练记录使用tensorboard
+训练loss舍弃itg_loss
+
+训练数据200万图片文本对，题库数量4500万
+
+模型训练基于huggingface的accelerate库+deepspeed库进行分布式多机多卡训练，训练记录使用tensorboard
