@@ -429,6 +429,23 @@ def convert_weights_to_fp16(model: nn.Module):
         #             tensor.data = tensor.data.half()
 
     model.apply(_convert_weights_to_fp16)
+
+def convert_weights_to_bf16(model: nn.Module):
+    """Convert applicable model parameters to bf16"""
+
+    def _convert_weights_to_bf16(l):
+        if isinstance(l, (nn.Conv1d, nn.Conv2d, nn.Linear)):
+            l.weight.data = l.weight.data.to(torch.bfloat16)
+            if l.bias is not None:
+                l.bias.data = l.bias.data.to(torch.bfloat16)
+
+        # if isinstance(l, (nn.MultiheadAttention, Attention)):
+        #     for attr in [*[f"{s}_proj_weight" for s in ["in", "q", "k", "v"]], "in_proj_bias", "bias_k", "bias_v"]:
+        #         tensor = getattr(l, attr)
+        #         if tensor is not None:
+        #             tensor.data = tensor.data.bfloat16()
+
+    model.apply(_convert_weights_to_bf16)
     
     
 def create_eva_vit_g(img_size=224,drop_path_rate=0.4,use_checkpoint=False,precision="fp16"):
@@ -463,4 +480,6 @@ def create_eva_vit_g(img_size=224,drop_path_rate=0.4,use_checkpoint=False,precis
     if precision == "fp16":
 #         model.to("cuda") 
         convert_weights_to_fp16(model)
+    if precision == "bf16":
+        convert_weights_to_bf16(model)
     return model
