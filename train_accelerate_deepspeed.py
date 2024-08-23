@@ -176,7 +176,7 @@ def main(args):
     start_epoch = 0
 
     if args.resume_from_checkpoint:
-        accelerator.load_state(args.resume_from_checkpoint, strict=False)
+        accelerator.load_state(args.resume_from_checkpoint)
         accelerator.print(f"Resume from checkpoint: {args.resume_from_checkpoint}")
 
         path = os.path.basename(args.resume_from_checkpoint)
@@ -271,7 +271,7 @@ if __name__ == '__main__':
     parser.add_argument("--per_device_train_batch_size", type=int, default=8, help="per_device_train_batch_size")
     parser.add_argument( "--max_train_steps", type=int, default=None, help="Total number of training steps to perform. If provided, overrides num_train_epochs.")
     parser.add_argument("--log_steps", type=int, default=1, help="how many steps to log once")
-    parser.add_argument("--lr", type=float, default=2e-6, help="learning_rate") # 2e-5/image_ids: 5e-6
+    parser.add_argument("--lr", type=float, default=5e-6, help="learning_rate") # 2e-5/image_ids: 5e-6
     parser.add_argument("--seed", type=int, default=42, help="seed")
     parser.add_argument("--lr_scheduler_type", type=SchedulerType,
         default="cosine",
