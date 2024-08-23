@@ -28,9 +28,8 @@ from tqdm.auto import tqdm
 
 def evaluate(model, val_loader, accelerator):
     model.eval()
-    accelerator.print("#################")
-    accelerator.print("Start validation")
-    accelerator.print("#################")
+    accelerator.print("******************************")
+    accelerator.print("***** Running evaluation *****")
     with torch.no_grad():
         val_image_ids_list = []
         val_text_features_list = []
@@ -93,22 +92,21 @@ def main(args):
     model = Blip2Qformer(
         vit_model=args.vit_model_name,
         vit_precision=args.vit_precision,
+        freeze_vit=args.freeze_vit,
     )
 
-
     # 初始化accelerator
-    # accelerator = Accelerator(log_with="tensorboard")
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
     accelerator = Accelerator(kwargs_handlers=[ddp_kwargs], 
                               gradient_accumulation_steps=args.gradient_accumulation_steps,
-                              mixed_precision=args.mixed_precision,)
-    
+                              mixed_precision=args.mixed_precision,
+                              )
 
     # 定义优化器
     optimizer_cls = (
         optim.AdamW
         if accelerator.state.deepspeed_plugin is None
-        or "optimizer" not in accelerator.state.deepspeed_plugin.deep_speed_config
+        or "optimizer" not in accelerator.state.deepspeed_plugin.deepspeed_config
         else DummyOptim
     )
     optimizer = optimizer_cls(model.parameters(), lr=args.lr)
@@ -124,7 +122,7 @@ def main(args):
     # 定义学习率调度器
     if (
         accelerator.state.deepspeed_plugin is None
-        or "scheduler" not in accelerator.state.deepspeed_plugin.deep_speed_config
+        or "scheduler" not in accelerator.state.deepspeed_plugin.deepspeed_config
     ):
         lr_scheduler = get_scheduler(
             name=args.lr_scheduler_type,
@@ -151,32 +149,42 @@ def main(args):
     # Afterwards we recalculate our number of training epochs
     args.num_train_epochs = math.ceil(args.max_train_steps / num_update_steps_per_epoch)
 
+    # Training!
+    total_batch_size = args.per_device_train_batch_size * accelerator.num_processes * accelerator.gradient_accumulation_steps
+
+    accelerator.print("***** Running training *****")
+    accelerator.print(f"Num examples = {len(train_dataset)}")
+    accelerator.print(f"Num Epochs = {args.num_train_epochs}")
+    accelerator.print(f"Instantaneous batch size per device = {args.per_device_train_batch_size}")
+    accelerator.print(f"Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
+    accelerator.print(f"Gradient Accumulation steps = {accelerator.gradient_accumulation_steps}")
+    accelerator.print(f"Total optimization steps = {args.max_train_steps}")
+    accelerator.print(f"LR Scheduler = {accelerator._schedulers}")
+    accelerator.print(f"Optimizer = {optimizer}")
+    accelerator.print(f"Accelerator state from the current environment:\n{accelerator.state}")
+    accelerator.print(f"DeepSpeed Engine = {accelerator.state.deepspeed_plugin}")
+
+
     date = os.popen('date +"%Y-%m-%d-%H-%M-%S"').read().strip()
     log_dir = os.path.join(args.log_dir, date)
-
     if accelerator.is_main_process:
-        if not os.path.exists(log_dir):
-            os.makedirs(log_dir)
-    accelerator.wait_for_everyone()
-
-    tf_writer = SummaryWriter(log_dir=log_dir)
+        os.makedirs(log_dir, exist_ok=True)
+        tf_writer = SummaryWriter(log_dir=log_dir)
 
     train_bar = tqdm(range(args.max_train_steps), desc="Training", leave=False, disable=not accelerator.is_main_process)
-
     overall_step = 0
     start_epoch = 0
 
     if args.resume_from_checkpoint:
-        accelerator.print(f"Resume from checkpoint: {args.resume_from_checkpoint}")
         accelerator.load_state(args.resume_from_checkpoint, strict=False)
+        accelerator.print(f"Resume from checkpoint: {args.resume_from_checkpoint}")
 
         path = os.path.basename(args.resume_from_checkpoint)
         resume_step = int(path.split('-')[-1])
-        start_epoch = resume_step // len(train_loader)
-        resume_step -= start_epoch * len(train_loader)
+        start_epoch = resume_step // num_update_steps_per_epoch
+        resume_step -= start_epoch * num_update_steps_per_epoch
 
         train_bar.update(resume_step)
-
 
     # 开始训练
     for epoch in range(start_epoch, args.num_train_epochs):
@@ -188,7 +196,6 @@ def main(args):
             activate_dataloader = train_loader
 
         for step, batch in enumerate(activate_dataloader):
-            # step = i + epoch * len(train_loader) + 1
 
             with accelerator.accumulate(model):
 
@@ -203,35 +210,31 @@ def main(args):
                 lr_scheduler.step()
                 optimizer.zero_grad()
 
-                loss_reduced = accelerator.gather(loss).mean()
-                loss_itc_reduced = accelerator.gather(loss_itc).mean()
-                loss_itm_reduced = accelerator.gather(loss_itm).mean()
-
-                overall_step += 1
-
-                if accelerator.is_main_process:
+                loss_reduced = accelerator.gather(loss).mean().float()
+                loss_itc_reduced = accelerator.gather(loss_itc).mean().float()
+                loss_itm_reduced = accelerator.gather(loss_itm).mean().float()
+                
+                if accelerator.sync_gradients:
                     train_bar.update(1)
                     train_bar.set_postfix({"loss": loss_reduced.item(), "loss_itc": loss_itc_reduced.item(), "loss_itm": loss_itm_reduced.item()})
-                    if overall_step % 5 == 0:
-                        train_bar.write(f"Epoch {epoch}, Step {overall_step}, lr: {optimizer.param_groups[0]['lr']}, loss: {loss_reduced.item()}, loss_itc: {loss_itc_reduced.item()}, loss_itm: {loss_itm_reduced.item()}")
+                    overall_step += 1
 
-                    tf_writer.add_scalar("train/loss", loss_reduced, overall_step)
-                    # tf_writer.add_scalar("train/loss_itc", loss_itc_reduced, step)
-                    # tf_writer.add_scalar("train/loss_itm", loss_itm_reduced, step)
-                    tf_writer.add_scalar("train/learning_rate", optimizer.param_groups[0]['lr'], overall_step)
+                    if accelerator.is_main_process:
+                        if overall_step % args.log_steps == 0:
+                            train_bar.write(f"Epoch {epoch}, Step {overall_step}, lr: {optimizer.param_groups[0]['lr']}, loss: {loss_reduced.item()}, loss_itc: {loss_itc_reduced.item()}, loss_itm: {loss_itm_reduced.item()}")
+                    
+                        tf_writer.add_scalar("train/loss", loss_reduced, overall_step)
+                        tf_writer.add_scalar("train/loss_itc", loss_itc_reduced, step)
+                        tf_writer.add_scalar("train/loss_itm", loss_itm_reduced, overall_step)
+                        tf_writer.add_scalar("train/learning_rate", optimizer.param_groups[0]['lr'], overall_step)
 
-                    # 更新loss
-                    # accelerator.log({"loss": loss_reduced}, step=step)
-
-                if overall_step % args.checkpoint_step == 0:
-
+                if overall_step % args.checkpoint_steps == 0:
                     # 保存模型以及状态
                     accelerator.wait_for_everyone()
-                    if accelerator.is_main_process:
-                        output_dir = os.path.join(args.output_dir, f"checkpoint-{overall_step}")
-                        accelerator.save_model(model, output_dir)
-                        accelerator.save_state(output_dir)
-                        accelerator.print(f"Save model to {output_dir}")
+                    output_dir = os.path.join(args.output_dir, f"checkpoint-{overall_step}")
+                    accelerator.save_model(model, output_dir)
+                    accelerator.save_state(output_dir)
+                    accelerator.print(f"Save model to {output_dir}")
 
                     # 验证
                     recalls_i2t = evaluate(model, val_loader, accelerator)
@@ -246,10 +249,9 @@ def main(args):
 
     # 训练结束，保存模型
     accelerator.wait_for_everyone()
-    if accelerator.is_main_process:
-        output_dir = os.path.join(args.output_dir, "final_checkpoint")
-        accelerator.save_model(model, output_dir)
-        accelerator.save_state(output_dir)
+    output_dir = os.path.join(args.output_dir, "final_checkpoint")
+    accelerator.save_model(model, output_dir)
+    accelerator.save_state(output_dir)
 
     # 验证
     recalls_i2t = evaluate(model, val_loader, accelerator)
@@ -268,7 +270,8 @@ if __name__ == '__main__':
     parser.add_argument("--num_train_epochs", type=int, default=2, help="num_train_epochs")
     parser.add_argument("--per_device_train_batch_size", type=int, default=8, help="per_device_train_batch_size")
     parser.add_argument( "--max_train_steps", type=int, default=None, help="Total number of training steps to perform. If provided, overrides num_train_epochs.")
-    parser.add_argument("--lr", type=float, default=5e-6, help="learning_rate") # 2e-5/image_ids: 5e-6
+    parser.add_argument("--log_steps", type=int, default=1, help="how many steps to log once")
+    parser.add_argument("--lr", type=float, default=2e-6, help="learning_rate") # 2e-5/image_ids: 5e-6
     parser.add_argument("--seed", type=int, default=42, help="seed")
     parser.add_argument("--lr_scheduler_type", type=SchedulerType,
         default="cosine",
@@ -282,6 +285,7 @@ if __name__ == '__main__':
 
     parser.add_argument("--vit_model_name", type=str, default='eva_clip_g', help="vit_model_name")
     parser.add_argument("--vit_precision", type=str, default='fp32', help="vit_precision")
+    parser.add_argument("--freeze_vit", type=bool, default=False, help="freeze_vit")
 
     parser.add_argument(
         "--mixed_precision",
@@ -291,7 +295,7 @@ if __name__ == '__main__':
         help="Whether to use mixed precision. Choose between fp16 and bf16 (bfloat16). Bf16 requires PyTorch >= 1.10. and an Nvidia Ampere GPU.",
     )
 
-    parser.add_argument("--checkpoint_step", type=int, default=1000, help="checkpoint_step")
+    parser.add_argument("--checkpoint_steps", type=int, default=1000, help="checkpoint_steps")
     parser.add_argument("--gradient_accumulation_steps", type=int, default=1, help="gradient_accumulation_steps")
 
 
