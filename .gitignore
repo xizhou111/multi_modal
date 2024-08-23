@@ -33,5 +33,6 @@ eval/mappings
 /outputs
 
 /triton_cache
+.deepspeed_env
 
 train_DDP.py
