@@ -224,7 +224,7 @@ def main(args):
                             train_bar.write(f"Epoch {epoch}, Step {overall_step}, lr: {optimizer.param_groups[0]['lr']}, loss: {loss_reduced.item()}, loss_itc: {loss_itc_reduced.item()}, loss_itm: {loss_itm_reduced.item()}")
                     
                         tf_writer.add_scalar("train/loss", loss_reduced, overall_step)
-                        tf_writer.add_scalar("train/loss_itc", loss_itc_reduced, step)
+                        tf_writer.add_scalar("train/loss_itc", loss_itc_reduced, overall_step)
                         tf_writer.add_scalar("train/loss_itm", loss_itm_reduced, overall_step)
                         tf_writer.add_scalar("train/learning_rate", optimizer.param_groups[0]['lr'], overall_step)
 
