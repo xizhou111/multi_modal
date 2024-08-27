@@ -159,11 +159,8 @@ def main(args):
     accelerator.print(f"Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
     accelerator.print(f"Gradient Accumulation steps = {accelerator.gradient_accumulation_steps}")
     accelerator.print(f"Total optimization steps = {args.max_train_steps}")
-    accelerator.print(f"LR Scheduler = {accelerator._schedulers}")
     accelerator.print(f"Optimizer = {optimizer}")
     accelerator.print(f"Accelerator state from the current environment:\n{accelerator.state}")
-    accelerator.print(f"DeepSpeed Engine = {accelerator.state.deepspeed_plugin}")
-
 
     date = os.popen('date +"%Y-%m-%d-%H-%M-%S"').read().strip()
     log_dir = os.path.join(args.log_dir, date)
@@ -184,6 +181,7 @@ def main(args):
         start_epoch = resume_step // num_update_steps_per_epoch
         resume_step -= start_epoch * num_update_steps_per_epoch
 
+        accelerator.print(f"Resume from epoch {start_epoch}, step {resume_step}")
         train_bar.update(resume_step)
 
     # 开始训练
@@ -228,23 +226,23 @@ def main(args):
                         tf_writer.add_scalar("train/loss_itm", loss_itm_reduced, overall_step)
                         tf_writer.add_scalar("train/learning_rate", optimizer.param_groups[0]['lr'], overall_step)
 
-                if overall_step % args.checkpoint_steps == 0:
-                    # 保存模型以及状态
-                    accelerator.wait_for_everyone()
-                    output_dir = os.path.join(args.output_dir, f"checkpoint-{overall_step}")
-                    accelerator.save_model(model, output_dir)
-                    accelerator.save_state(output_dir)
-                    accelerator.print(f"Save model to {output_dir}")
+                    if overall_step % args.checkpoint_steps == 0:
+                        # 保存模型以及状态
+                        accelerator.wait_for_everyone()
+                        output_dir = os.path.join(args.output_dir, f"checkpoint-{overall_step}")
+                        accelerator.save_model(model, output_dir)
+                        accelerator.save_state(output_dir)
+                        accelerator.print(f"Save model to {output_dir}")
 
-                    # 验证
-                    recalls_i2t = evaluate(model, val_loader, accelerator)
+                        # 验证
+                        recalls_i2t = evaluate(model, val_loader, accelerator)
 
-                    if accelerator.is_main_process:
-                        for k, v in recalls_i2t.items():
-                            tf_writer.add_scalar(f"val/i2t_recall@{k}", v, overall_step)
-                        accelerator.print(recalls_i2t)
+                        if accelerator.is_main_process:
+                            for k, v in recalls_i2t.items():
+                                tf_writer.add_scalar(f"val/i2t_recall@{k}", v, overall_step)
+                            accelerator.print(recalls_i2t)
 
-                    accelerator.wait_for_everyone()
+                        accelerator.wait_for_everyone()
 
 
     # 训练结束，保存模型
