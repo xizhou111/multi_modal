@@ -76,6 +76,7 @@ class MultiModelDataset(Dataset):
                 image = torch.zeros((3, 448, 448), dtype=torch.float32)
                 print('image_path not exists:', image_path)
         else:
+            print('image_path is empty:', image_path)
             image = torch.zeros((3, 448, 448), dtype=torch.float32)
 
         if text == '':
