@@ -78,8 +78,8 @@ def main(args):
     with open(args.val_data_path, 'r') as f:
         val_data = json.load(f)
 
-    train_dataset = MultiModelDataset(train_data)
-    val_dataset = MultiModelDataset(val_data)
+    train_dataset = MultiModelDataset(train_data, img_size=args.img_size)
+    val_dataset = MultiModelDataset(val_data, img_size=args.img_size)
 
     per_device_train_batch_size = args.per_device_train_batch_size
     train_loader = DataLoader(train_dataset, batch_size=per_device_train_batch_size, shuffle=True, num_workers=4, pin_memory=True)
@@ -91,6 +91,7 @@ def main(args):
     # 加载模型
     model = Blip2Qformer(
         vit_model=args.vit_model_name,
+        img_size=args.img_size,
         vit_precision=args.vit_precision,
         freeze_vit=args.freeze_vit,
     )
@@ -281,6 +282,7 @@ if __name__ == '__main__':
     parser.add_argument("--train_data_path", type=str, default='/mnt/cfs/ssw/zcl/multi_modal/data/new/blip2_data_train.json', help="train_data_path")
     parser.add_argument("--val_data_path", type=str, default='/mnt/cfs/ssw/zcl/multi_modal/data/new/blip2_data_val.json', help="val_data_path")
 
+    parser.add_argument("--img_size", type=int, default=336, help="img_size")
     parser.add_argument("--vit_model_name", type=str, default='eva_clip_g', help="vit_model_name")
     parser.add_argument("--vit_precision", type=str, default='fp32', help="vit_precision")
     parser.add_argument("--freeze_vit", type=bool, default=False, help="freeze_vit")

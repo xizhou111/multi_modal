@@ -29,11 +29,12 @@ def resize_and_pad(image_path, target_size=448):
     return padded_image
 
 class MultiModelDataset(Dataset):
-    def __init__(self, data, transform=None):
+    def __init__(self, data, transform=None, img_size=448):
         self.data = data
         self.transform = transform or transforms.Compose([
             transforms.ToTensor() # dtype=torch.float32
         ])
+        self.target_size = img_size
     
     def resize_and_pad(self, image_path, target_size=None):
         # 读取图像
@@ -68,16 +69,16 @@ class MultiModelDataset(Dataset):
         if image_path != '':
             # 使用 resize_and_pad 函数预处理图像到 448x448 大小
             try:
-                image = self.resize_and_pad(image_path, target_size=448)
+                image = self.resize_and_pad(image_path, target_size=self.target_size)
                 # 将 NumPy 数组转换为 PIL 图像，以便可以使用 torchvision.transforms
                 image = Image.fromarray(image)
                 image = self.transform(image) # dtype=torch.float32
             except:
-                image = torch.zeros((3, 448, 448), dtype=torch.float32)
+                image = torch.zeros((3, self.target_size, self.target_size), dtype=torch.float32)
                 print('image_path not exists:', image_path)
         else:
             print('image_path is empty:', image_path)
-            image = torch.zeros((3, 448, 448), dtype=torch.float32)
+            image = torch.zeros((3, self.target_size, self.target_size), dtype=torch.float32)
 
         if text == '':
             text = ' '
