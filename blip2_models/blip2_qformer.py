@@ -133,11 +133,17 @@ class Blip2Qformer(Blip2Base):
         )  # [batch_size*num_gpu, num_query_tokens, embed_dim]
         text_feat_all = concat_all_gather(text_feat)  # [batch_size*num_gpu, embed_dim]
 
+        image_feats_all = image_feats_all.mean(dim=1)  # [batch_size*num_gpu, embed_dim]
         image_feats = image_feats.mean(dim=1)  # [batch_size, embed_dim]
         sim_i2t = torch.matmul(
             image_feats, text_feat_all.t()
         )  # [batch_size, batch_size*num_gpu]
         sim_i2t = sim_i2t / self.temp
+
+        sim_t2i = torch.matmul(
+            text_feat, image_feats_all.t()
+        )  # [batch_size, batch_size*num_gpu]
+        sim_t2i = sim_t2i / self.temp
 
         # image_feats.unsqueeze(1): [batch_size, 1, num_query_tokens, embed_dim]
         # text_feat_all.unsqueeze(-1): [batch_size*num_gpu, embed_dim, 1]
@@ -180,88 +186,89 @@ class Blip2Qformer(Blip2Base):
             # loss_i2t = -torch.sum(F.log_softmax(sim_i2t, dim=1)*sim_targets,dim=1).mean()     
             # loss_itc = (loss_t2i+loss_i2t)/2  
         else:                     
-            # loss_itc = (
-            #     F.cross_entropy(sim_i2t, targets, label_smoothing=0.1)
-            #     + F.cross_entropy(sim_t2i, targets, label_smoothing=0.1)
-            # ) / 2
-            loss_itc = F.cross_entropy(sim_i2t, targets, label_smoothing=0.1)
+            loss_itc = (
+                F.cross_entropy(sim_i2t, targets, label_smoothing=0.1)
+                + F.cross_entropy(sim_t2i, targets, label_smoothing=0.1)
+            ) / 2
+            # loss_itc = F.cross_entropy(sim_i2t, targets, label_smoothing=0.1)
 
         ###============== Image-text Matching ===================###
-        # text_input_ids_world = concat_all_gather(text_tokens.input_ids) # [batch_size*num_gpu, max_txt_len]
-        # text_attention_mask_world = concat_all_gather(text_tokens.attention_mask)
-        # image_embeds_world = all_gather_with_grad(image_embeds) # [batch_size*num_gpu, num_patches, embed_dim]
-        # with torch.no_grad():
-        #     if "image_ids" in samples.keys():
-        #        # 将同一张图片的正样本排除在负样本之外
-        #         mask = torch.eq(image_ids, image_ids_all.t())
-        #         sim_t2i.masked_fill_(mask, -10000)
-        #         sim_i2t.masked_fill_(mask, -10000)
-        #     else:    
-        #         sim_t2i[:, rank * bs : rank * bs + bs].fill_diagonal_(-10000)
-        #         sim_i2t[:, rank * bs : rank * bs + bs].fill_diagonal_(-10000)            
+        text_input_ids_world = concat_all_gather(text_tokens.input_ids) # [batch_size*num_gpu, max_txt_len]
+        text_attention_mask_world = concat_all_gather(text_tokens.attention_mask)
+        image_embeds_world = all_gather_with_grad(image_embeds) # [batch_size*num_gpu, num_patches, embed_dim]
+        with torch.no_grad():
+            if "image_ids" in samples.keys():
+               # 将同一张图片的正样本排除在负样本之外
+                # mask = torch.eq(image_ids, image_ids_all.t())
+                # sim_t2i.masked_fill_(mask, -10000)
+                # sim_i2t.masked_fill_(mask, -10000)
+                pass
+            else:    
+                sim_t2i[:, rank * bs : rank * bs + bs].fill_diagonal_(-10000)
+                sim_i2t[:, rank * bs : rank * bs + bs].fill_diagonal_(-10000)            
                 
-        #     weights_t2i = F.softmax(sim_t2i, dim=1)
-        #     weights_i2t = F.softmax(sim_i2t, dim=1)
+            weights_t2i = F.softmax(sim_t2i, dim=1)
+            weights_i2t = F.softmax(sim_i2t, dim=1)
 
-        # # select a negative image for each text
-        # image_embeds_neg = []
-        # for b in range(bs):
-        #     neg_idx = torch.multinomial(weights_t2i[b], 1).item()
-        #     image_embeds_neg.append(image_embeds_world[neg_idx])
-        # image_embeds_neg = torch.stack(image_embeds_neg, dim=0) # [batch_size, num_patches, embed_dim]
+        # select a negative image for each text
+        image_embeds_neg = []
+        for b in range(bs):
+            neg_idx = torch.multinomial(weights_t2i[b], 1).item()
+            image_embeds_neg.append(image_embeds_world[neg_idx])
+        image_embeds_neg = torch.stack(image_embeds_neg, dim=0) # [batch_size, num_patches, embed_dim]
 
-        # # select a negative text for each image
-        # text_ids_neg = []
-        # text_atts_neg = []
-        # for b in range(bs):
-        #     neg_idx = torch.multinomial(weights_i2t[b], 1).item()
-        #     text_ids_neg.append(text_input_ids_world[neg_idx])
-        #     text_atts_neg.append(text_attention_mask_world[neg_idx])
+        # select a negative text for each image
+        text_ids_neg = []
+        text_atts_neg = []
+        for b in range(bs):
+            neg_idx = torch.multinomial(weights_i2t[b], 1).item()
+            text_ids_neg.append(text_input_ids_world[neg_idx])
+            text_atts_neg.append(text_attention_mask_world[neg_idx])
 
-        # text_ids_neg = torch.stack(text_ids_neg, dim=0) # [batch_size, max_txt_len]
-        # text_atts_neg = torch.stack(text_atts_neg, dim=0)
+        text_ids_neg = torch.stack(text_ids_neg, dim=0) # [batch_size, max_txt_len]
+        text_atts_neg = torch.stack(text_atts_neg, dim=0)
 
-        # text_ids_all = torch.cat(
-        #     [text_tokens.input_ids, text_tokens.input_ids, text_ids_neg], dim=0
-        # )  # pos, pos, neg
-        # # text_ids_all: [3*batch_size, max_txt_len]
-        # text_atts_all = torch.cat(
-        #     [text_tokens.attention_mask, text_tokens.attention_mask, text_atts_neg],
-        #     dim=0,
-        # )
+        text_ids_all = torch.cat(
+            [text_tokens.input_ids, text_tokens.input_ids, text_ids_neg], dim=0
+        )  # pos, pos, neg
+        # text_ids_all: [3*batch_size, max_txt_len]
+        text_atts_all = torch.cat(
+            [text_tokens.attention_mask, text_tokens.attention_mask, text_atts_neg],
+            dim=0,
+        )
 
-        # query_tokens_itm = self.query_tokens.expand(text_ids_all.shape[0], -1, -1) # [3*batch_size, num_query_tokens, embed_dim]
-        # query_atts_itm = torch.ones(query_tokens_itm.size()[:-1], dtype=torch.long).to(
-        #     image.device
-        # ) # one means not masked, zero means masked
-        # attention_mask_all = torch.cat([query_atts_itm, text_atts_all], dim=1)
+        query_tokens_itm = self.query_tokens.expand(text_ids_all.shape[0], -1, -1) # [3*batch_size, num_query_tokens, embed_dim]
+        query_atts_itm = torch.ones(query_tokens_itm.size()[:-1], dtype=torch.long).to(
+            image.device
+        ) # one means not masked, zero means masked
+        attention_mask_all = torch.cat([query_atts_itm, text_atts_all], dim=1)
 
-        # image_embeds_all = torch.cat(
-        #     [image_embeds, image_embeds_neg, image_embeds], dim=0
-        # )  # pos, neg, pos
-        # # image_embeds_all: [3*batch_size, num_patches, embed_dim]
-        # image_atts_all = torch.ones(image_embeds_all.size()[:-1], dtype=torch.long).to(
-        #     image.device
-        # )
+        image_embeds_all = torch.cat(
+            [image_embeds, image_embeds_neg, image_embeds], dim=0
+        )  # pos, neg, pos
+        # image_embeds_all: [3*batch_size, num_patches, embed_dim]
+        image_atts_all = torch.ones(image_embeds_all.size()[:-1], dtype=torch.long).to(
+            image.device
+        )
 
-        # output_itm = self.Qformer.bert(
-        #     text_ids_all,
-        #     query_embeds=query_tokens_itm,
-        #     attention_mask=attention_mask_all,
-        #     encoder_hidden_states=image_embeds_all,
-        #     encoder_attention_mask=image_atts_all,
-        #     return_dict=True,
-        # )
+        output_itm = self.Qformer.bert(
+            text_ids_all,
+            query_embeds=query_tokens_itm,
+            attention_mask=attention_mask_all,
+            encoder_hidden_states=image_embeds_all,
+            encoder_attention_mask=image_atts_all,
+            return_dict=True,
+        )
 
-        # vl_embeddings = output_itm.last_hidden_state[:, : query_tokens_itm.size(1), :] # [3*batch_size, num_query_tokens, embed_dim]
-        # vl_output = self.itm_head(vl_embeddings) # [3*batch_size, num_query_tokens, 2]
-        # logits = vl_output.mean(dim=1) # average pooling
+        vl_embeddings = output_itm.last_hidden_state[:, : query_tokens_itm.size(1), :] # [3*batch_size, num_query_tokens, embed_dim]
+        vl_output = self.itm_head(vl_embeddings) # [3*batch_size, num_query_tokens, 2]
+        logits = vl_output.mean(dim=1) # average pooling
 
-        # itm_labels = torch.cat(
-        #     [torch.ones(bs, dtype=torch.long), torch.zeros(2 * bs, dtype=torch.long)],
-        #     dim=0,
-        # ).to(image.device)
-        # loss_itm = F.cross_entropy(logits, itm_labels)
+        itm_labels = torch.cat(
+            [torch.ones(bs, dtype=torch.long), torch.zeros(2 * bs, dtype=torch.long)],
+            dim=0,
+        ).to(image.device)
+        loss_itm = F.cross_entropy(logits, itm_labels)
 
         ##================= Image Captioning ========================##
         # decoder_input_ids = text_tokens.input_ids.clone()
@@ -284,11 +291,11 @@ class Blip2Qformer(Blip2Base):
 
         # loss_lm = lm_output.loss
 
-        loss_itm = torch.zeros(1).to(image.device)
+        # loss_itm = torch.zeros(1).to(image.device)
         return BlipOutput(
             # loss=loss_itc + loss_itm + loss_lm,
-            # loss=loss_itc + loss_itm,
-            loss=loss_itc,
+            loss=loss_itc + loss_itm,
+            # loss=loss_itc,
             loss_itc=loss_itc,
             loss_itm=loss_itm,
             # loss_lm=loss_lm,
